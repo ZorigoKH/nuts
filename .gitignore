@@ -1,0 +1,22 @@
+# Build trees (CMake out-of-tree builds)
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+.pytest_cache/
+.ruff_cache/
+*.so
+*.pyd
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

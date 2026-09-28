@@ -1,0 +1,5 @@
+# Google style with a 100-column limit. Format with: clang-format -i <files>
+BasedOnStyle: Google
+ColumnLimit: 100
+DerivePointerAlignment: false
+PointerAlignment: Left
