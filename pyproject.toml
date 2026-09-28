@@ -1,0 +1,57 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nuts-poker"  # "nuts" is taken on PyPI; the import name is still `nuts`
+version = "0.1.0"
+description = "Poker hand evaluator, equity calculator and game-theory solvers (C++ core)"
+readme = "README.md"
+requires-python = ">=3.10"
+# The table form works with every scikit-build-core >= 0.10 (the SPDX string form, license =
+# "MIT", needs 0.11).
+license = { text = "MIT" }
+authors = [{ name = "Zorigtbaatar Khasbaatar", email = "zk2380@nyu.edu" }]
+keywords = ["poker", "hand evaluator", "equity", "cfr", "game theory"]
+classifiers = [
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+# eval7 and phevaluator are independent evaluators the tests compare against. eval7 has no
+# wheels for some platforms (e.g. Python 3.13); to build it from source, first run
+# `pip install cython setuptools wheel` and then `pip install --no-build-isolation eval7`.
+test = ["pytest", "eval7", "treys", "numpy", "phevaluator"]
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.24"
+cmake.build-type = "Release"
+# The package's Python files; CMake installs the compiled nuts/_core module next to them.
+wheel.packages = ["python/nuts"]
+# A fixed build directory (gitignored), so `pip install -e .` rebuilds incrementally.
+build-dir = "build-python/{wheel_tag}"
+
+[tool.scikit-build.cmake.define]
+NUTS_PYTHON = "ON"
+NUTS_TESTS = "OFF"
+NUTS_TOOLS = "OFF"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+# eval7 calls a pyparsing function that newer pyparsing versions deprecate; not our concern.
+filterwarnings = ["ignore:'parseString' deprecated"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, pyupgrade, bugbear, annotations
+select = ["E", "W", "F", "I", "UP", "B", "ANN"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nuts"]
