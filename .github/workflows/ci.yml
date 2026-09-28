@@ -1,0 +1,139 @@
+# Builds and tests the C++ library, the Python package and the WebAssembly build.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Release build on Linux (GCC) and macOS (Apple clang): the unit tests, the exhaustive check of
+  # all 133,784,560 seven-card hands, and a quick benchmark run (a smoke test, not for quoting).
+  cpp:
+    name: C++ Release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Exhaustive test (all seven-card hands)
+        run: ./build/nuts_tests "[exhaustive]"
+      - name: Benchmark (quick)
+        run: ./build/nuts_bench --quick
+
+  # Debug builds with sanitizers (clang): AddressSanitizer + UndefinedBehaviorSanitizer on every
+  # test except the exhaustive one (too slow unoptimized), ThreadSanitizer on the tests of the
+  # multithreaded code (Monte Carlo equity, the equity matrix) and the solvers.
+  sanitizers:
+    name: Sanitizers (${{ matrix.sanitize }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitize: address+undefined
+            tests: "~[exhaustive]"
+          - sanitize: thread
+            tests: "[equity],[pushfold],[kuhn]"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Reduce address randomization for the sanitizers
+        # The sanitizer runtimes reserve fixed address ranges, which can clash with the larger
+        # address-space randomization of recent Linux kernels ("unexpected memory mapping").
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=clang++
+          -DNUTS_SANITIZE=${{ matrix.sanitize }}
+      - name: Build
+        run: cmake --build build
+      - name: Tests
+        run: ./build/nuts_tests "${{ matrix.tests }}"
+
+  # The Python package, built by pip (scikit-build-core + nanobind) and tested against eval7,
+  # phevaluator and treys.
+  python:
+    name: Python ${{ matrix.python }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install eval7
+        # eval7 has no wheels for Python 3.13, nor for Python 3.10 on Apple silicon, so pip may
+        # have to compile it, and its build needs Cython installed beforehand.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cython setuptools wheel
+          python -m pip install --no-build-isolation eval7
+      - name: Build and install nuts with the test dependencies
+        run: python -m pip install ".[test]"
+      - name: Tests
+        run: python -m pytest tests/python -v
+      - name: Lint (ruff)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: |
+          python -m pip install ruff==0.16.9
+          ruff check python tests/python tools/verify
+          ruff format --check python tests/python tools/verify
+      - name: Independent cross-checks (tools/verify)
+        # Recompute expected values of the C++ tests without our code: the RNG constants, the
+        # 47,008 matchups, and exact preflop equities with eval7 (about 40 s together).
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: |
+          python tools/verify/rng_reference.py
+          python tools/verify/count_matchups.py
+          python tools/verify/eval7_crosscheck.py
+
+  # The WebAssembly build: nuts.mjs + nuts.wasm, checked in Node.js and kept as an artifact.
+  wasm:
+    name: WebAssembly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: "6.0.10"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Configure
+        run: emcmake cmake -S . -B build-wasm -G Ninja -DNUTS_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-wasm
+      - name: Smoke test
+        run: node wasm/smoke.mjs build-wasm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nuts-wasm
+          path: |
+            build-wasm/nuts.mjs
+            build-wasm/nuts.wasm
+          if-no-files-found: error
